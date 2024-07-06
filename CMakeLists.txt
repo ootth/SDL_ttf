@@ -1,17 +1,20 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.14)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 # See docs/release_checklist.md
 set(MAJOR_VERSION 2)
-set(MINOR_VERSION 23)
-set(MICRO_VERSION 0)
+set(MINOR_VERSION 20)
+set(MICRO_VERSION 2)
 set(SDL_REQUIRED_VERSION 2.0.10)
+
+# For historical reasons this is 15.0.0 rather than the expected 1.0.0
+set(DYLIB_COMPATIBILITY_VERSION "15.0.0")
 
 include(PrivateSdlFunctions)
 sdl_calculate_derived_version_variables()
 
-if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_CURRENT_BINARY_DIR)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     message(FATAL_ERROR "Prevented in-tree built. Please create a build directory outside of the SDL_ttf source code and call cmake from there")
 endif()
 
@@ -22,12 +25,6 @@ project(SDL2_ttf
 
 message(STATUS "Configuring ${PROJECT_NAME} ${PROJECT_VERSION}")
 
-if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
-    set(SDL2TTF_ROOTPROJECT ON)
-else()
-    set(SDL2TTF_ROOTPROJECT OFF)
-endif()
-
 # Set defaults preventing destination file conflicts
 set(SDL2TTF_DEBUG_POSTFIX "d"
     CACHE STRING "Name suffix for debug builds")
@@ -36,16 +33,10 @@ mark_as_advanced(SDL2TTF_DEBUG_POSTFIX)
 # Assume MSVC projects don't have a package manager and need vendored dependencies (by default).
 # Most other platforms have some kind of package manager.
 # FIXME: consider a package manager such as conan/vcpkg instead of vendoring
-if(ANDROID OR MSVC)
+if(MSVC)
     set(vendored_default TRUE)
 else()
     set(vendored_default FALSE)
-endif()
-
-set(sdl2ttf_install_enableable ON)
-if ((TARGET SDL2 OR TARGET SDL2-static) AND SDL2_DISABLE_INSTALL)
-    # Cannot install SDL2_mixer when SDL2 is built in same built, and is not installed.
-    set(sdl2ttf_install_enableable OFF)
 endif()
 
 include(CMakeDependentOption)
@@ -56,8 +47,8 @@ include(CheckSymbolExists)
 option(CMAKE_POSITION_INDEPENDENT_CODE "Build static libraries with -fPIC" ON)
 option(BUILD_SHARED_LIBS "Build the library as a shared library" ON)
 
-option(SDL2TTF_SAMPLES "Build the SDL2_ttf sample program(s)" ${SDL2TTF_ROOTPROJECT})
-cmake_dependent_option(SDL2TTF_INSTALL "Enable SDL2_ttf install target" ${SDL2TTF_ROOTPROJECT} "${sdl2ttf_install_enableable}" OFF)
+option(SDL2TTF_SAMPLES "Build the SDL2_ttf sample program(s)" ON)
+option(SDL2TTF_INSTALL "Enable SDL2_ttf install target" ON)
 option(SDL2TTF_VENDORED "Use vendored third-party libraries" ${vendored_default})
 
 # For style consistency, create a SDL2TTF_FREETYPE CMake variable. This variable is NOT configurable.
@@ -112,20 +103,25 @@ if(WIN32 AND SDL2TTF_BUILD_SHARED_LIBS)
 endif()
 set_target_properties(SDL2_ttf PROPERTIES
     DEFINE_SYMBOL DLL_EXPORT
+    PUBLIC_HEADER SDL_ttf.h
     EXPORT_NAME ${sdl2_ttf_export_name}
     C_VISIBILITY_PRESET "hidden"
 )
 if(NOT ANDROID)
     set_target_properties(SDL2_ttf PROPERTIES
         DEBUG_POSTFIX "${SDL2TTF_DEBUG_POSTFIX}"
-        SOVERSION "${LT_MAJOR}"
-        VERSION "${LT_VERSION}"
     )
     if(APPLE)
-        cmake_minimum_required(VERSION 3.17)
+        # the SOVERSION property corresponds to the compatibility version and VERSION corresponds to the current version
+        # https://cmake.org/cmake/help/latest/prop_tgt/SOVERSION.html#mach-o-versions
         set_target_properties(SDL2_ttf PROPERTIES
-            MACHO_COMPATIBILITY_VERSION "${DYLIB_COMPATIBILITY_VERSION}"
-            MACHO_CURRENT_VERSION "${MACHO_CURRENT_VERSION}"
+            SOVERSION "${DYLIB_COMPATIBILITY_VERSION}"
+            VERSION "${DYLIB_CURRENT_VERSION}"
+        )
+    else()
+        set_target_properties(SDL2_ttf PROPERTIES
+            SOVERSION "${LT_MAJOR}"
+            VERSION "${LT_VERSION}"
         )
     endif()
 endif()
@@ -158,15 +154,6 @@ if(SDL2TTF_BUILD_SHARED_LIBS)
     # Use `Compatible Interface Properties` to ensure a shared SDL2_ttf is linked to a shared SDL2 library
     set_property(TARGET SDL2_ttf PROPERTY INTERFACE_SDL2_SHARED ${SDL2TTF_BUILD_SHARED_LIBS})
     set_property(TARGET SDL2_ttf APPEND PROPERTY COMPATIBLE_INTERFACE_BOOL SDL2_SHARED)
-endif()
-
-if(SDL2TTF_BUILD_SHARED_LIBS)
-    sdl_target_link_options_no_undefined(SDL2_ttf)
-endif()
-
-if(SDL2TTF_BUILD_SHARED_LIBS)
-    # Make sure static library dependencies are built with -fPIC when building a shared SDL2_ttf
-    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
 set(INSTALL_EXTRA_TARGETS)
@@ -251,6 +238,17 @@ endif()
 # Restore BUILD_SHARED_LIBS variable
 set(BUILD_SHARED_LIBS ${SDL2TTF_BUILD_SHARED_LIBS})
 
+set_target_properties(SDL2_ttf PROPERTIES
+    DEFINE_SYMBOL DLL_EXPORT
+    PUBLIC_HEADER SDL_ttf.h
+    EXPORT_NAME ${sdl2_ttf_export_name}
+    C_VISIBILITY_PRESET "hidden"
+)
+if (NOT ANDROID)
+    set_target_properties(SDL2_ttf PROPERTIES
+        DEBUG_POSTFIX "${SDL_CMAKE_DEBUG_POSTFIX}")
+endif()
+
 if (APPLE)
     # TODO: Use DYLIB_COMPATIBILITY_VERSION, DYLIB_CURRENT_VERSION here
 elseif (UNIX AND NOT APPLE AND NOT ANDROID)
@@ -258,6 +256,23 @@ elseif (UNIX AND NOT APPLE AND NOT ANDROID)
         SOVERSION "${LT_MAJOR}"
         VERSION "${LT_VERSION}"
     )
+endif()
+if (BUILD_SHARED_LIBS)
+    if (WIN32 OR OS2)
+        set_target_properties(SDL2_ttf PROPERTIES
+            PREFIX ""
+        )
+    endif()
+    if (OS2)
+        # OS/2 doesn't support a DLL name longer than 8 characters.
+        set_target_properties(SDL2_ttf PROPERTIES
+           OUTPUT_NAME "SDL2ttf"
+        )
+    elseif (UNIX AND NOT APPLE AND NOT ANDROID)
+        set_target_properties(SDL2_ttf PROPERTIES
+            OUTPUT_NAME "SDL2_ttf-${LT_RELEASE}"
+        )
+    endif()
 endif()
 
 # Restore BUILD_SHARED_LIBS variable
@@ -270,10 +285,7 @@ if(SDL2TTF_INSTALL)
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT library
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT library
-    )
-    install(FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/SDL_ttf.h"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/SDL2" COMPONENT devel
+        PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/SDL2" COMPONENT devel
     )
 
     if(INSTALL_EXTRA_TARGETS)
@@ -287,14 +299,13 @@ if(SDL2TTF_INSTALL)
     endif()
 
     if(WIN32 AND NOT MINGW)
-        set(SDLTTF_INSTALL_CMAKEDIR_DEFAULT "cmake")
+        set(PKG_PREFIX "cmake")
     else()
-        set(SDLTTF_INSTALL_CMAKEDIR_DEFAULT "${CMAKE_INSTALL_LIBDIR}/cmake/SDL2_ttf")
+        set(PKG_PREFIX "${CMAKE_INSTALL_LIBDIR}/cmake/SDL2_ttf")
     endif()
-    set(SDLTTF_INSTALL_CMAKEDIR "${SDLTTF_INSTALL_CMAKEDIR_DEFAULT}" CACHE STRING "Location where to install SDL2_ttfConfig.cmake")
 
     configure_package_config_file(SDL2_ttfConfig.cmake.in SDL2_ttfConfig.cmake
-        INSTALL_DESTINATION "${SDLTTF_INSTALL_CMAKEDIR}"
+        INSTALL_DESTINATION "${PKG_PREFIX}"
     )
     write_basic_package_version_file("${PROJECT_BINARY_DIR}/SDL2_ttfConfigVersion.cmake"
         VERSION ${FULL_VERSION}
@@ -304,44 +315,46 @@ if(SDL2TTF_INSTALL)
         FILES
             "${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttfConfig.cmake"
             "${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttfConfigVersion.cmake"
-        DESTINATION ${SDLTTF_INSTALL_CMAKEDIR}
+        DESTINATION ${PKG_PREFIX}
         COMPONENT devel
     )
     install(EXPORT SDL2_ttfTargets
         FILE SDL2_ttf-${sdl2_ttf_install_name_infix}-targets.cmake
         NAMESPACE SDL2_ttf::
-        DESTINATION "${SDLTTF_INSTALL_CMAKEDIR}"
+        DESTINATION "${PKG_PREFIX}"
         COMPONENT devel
     )
 
-    set(prefix "${CMAKE_INSTALL_PREFIX}")
-    set(exec_prefix "\${prefix}")
-    set(libdir "\${exec_prefix}/${CMAKE_INSTALL_LIBDIR}")
-    set(includedir "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
-    set(PACKAGE "${PROJECT_NAME}")
-    set(VERSION ${FULL_VERSION})
-    set(SDL_VERSION ${SDL_REQUIRED_VERSION})
-    string(JOIN " " PC_REQUIRES ${PC_REQUIRES})
-    string(JOIN " " PC_LIBS ${PC_LIBS})
-    configure_file("${PROJECT_SOURCE_DIR}/SDL2_ttf.pc.in" "${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttf.pc.intermediate" @ONLY)
-    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttf-$<CONFIG>.pc" INPUT "${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttf.pc.intermediate")
+    if(SDL2TTF_BUILD_SHARED_LIBS)
+        # Only create a .pc file for a shared SDL2_ttf
+        set(prefix "${CMAKE_INSTALL_PREFIX}")
+        set(exec_prefix "\${prefix}")
+        set(libdir "\${exec_prefix}/${CMAKE_INSTALL_LIBDIR}")
+        set(includedir "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
+        set(PACKAGE "${PROJECT_NAME}")
+        set(VERSION ${FULL_VERSION})
+        set(SDL_VERSION ${SDL_REQUIRED_VERSION})
+        string(JOIN " " PC_REQUIRES ${PC_REQUIRES})
+        string(JOIN " " PC_LIBS ${PC_LIBS})
+        configure_file("${PROJECT_SOURCE_DIR}/SDL2_ttf.pc.in" "${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttf.pc.intermediate" @ONLY)
+        file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttf-$<CONFIG>.pc" INPUT "${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttf.pc.intermediate")
 
-    set(PC_DESTDIR)
-    if(CMAKE_SYSTEM_NAME MATCHES FreeBSD)
-        # FreeBSD uses ${PREFIX}/libdata/pkgconfig
-        set(PC_DESTDIR "libdata/pkgconfig")
-    else()
-        set(PC_DESTDIR "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
-    endif()
-    # Always install SDL2_ttf.pc file: libraries might be different between config modes
-    install(CODE "
+        set(PC_DESTDIR)
+        if(CMAKE_SYSTEM_NAME MATCHES FreeBSD)
+            # FreeBSD uses ${PREFIX}/libdata/pkgconfig
+            set(PC_DESTDIR "libdata/pkgconfig")
+        else()
+            set(PC_DESTDIR "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+        endif()
+        # Only install a SDL2_ttf.pc file in Release mode
+        install(CODE "
         # FIXME: use file(COPY_FILE) if CMake 3.21+
-        execute_process(COMMAND \"${CMAKE_COMMAND}\" -E copy_if_different
-            \"${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttf-$<CONFIG>.pc\"
+        execute_process(COMMAND \"${CMAKE_COMMAND}\" -E copy \"${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttf-$<CONFIG>.pc\"
             \"${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttf.pc\")
         file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${PC_DESTDIR}\"
             TYPE FILE
-            FILES \"${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttf.pc\")" COMPONENT devel)
+            FILES \"${CMAKE_CURRENT_BINARY_DIR}/SDL2_ttf.pc\")" CONFIG Release)
+    endif()
 
     if(SDL2TTF_BUILD_SHARED_LIBS AND (APPLE OR (UNIX AND NOT ANDROID)))
         install(FILES

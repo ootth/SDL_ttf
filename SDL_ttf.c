@@ -1,6 +1,6 @@
 /*
   SDL_ttf:  A companion library to SDL for working with TrueType (tm) fonts
-  Copyright (C) 2001-2024 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 2001-2023 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -143,7 +143,7 @@ int TTF_SetScript(int script) /* hb_script_t */
 //#define USE_DUFFS_LOOP
 
 #if defined(HAVE_SSE2_INTRINSICS)
-static SDL_INLINE int hasSSE2(void)
+static SDL_INLINE int hasSSE2()
 {
     static int val = -1;
     if (val != -1) {
@@ -155,7 +155,7 @@ static SDL_INLINE int hasSSE2(void)
 #endif
 
 #if defined(HAVE_NEON_INTRINSICS)
-static SDL_INLINE int hasNEON(void)
+static SDL_INLINE int hasNEON()
 {
     static int val = -1;
     if (val != -1) {
@@ -260,9 +260,7 @@ struct _TTF_Font {
 
     /* Whether kerning is desired */
     int allow_kerning;
-#if !TTF_USE_HARFBUZZ
     int use_kerning;
-#endif
 
     /* Extra width in glyph bounds for text styles */
     int glyph_overhang;
@@ -418,9 +416,7 @@ static SDL_INLINE void BG_Blended_Color(const TTF_Image *image, Uint32 *destinat
         while (height--) {
             /* *INDENT-OFF* */
             DUFFS_LOOP4(
-                    /* prevent misaligned load: tmp = *src++; */
-                    /* eventually, we can expect the compiler to replace the memcpy call with something optimized */
-                    memcpy(&tmp, src++, sizeof(tmp)); /* This should NOT be SDL_memcpy */
+                    tmp = *src++;
                     alpha = tmp >> 24;
                     tmp &= ~0xFF000000;
                     alpha = fg_alpha * alpha;
@@ -448,15 +444,19 @@ static SDL_INLINE void BG_Blended_LCD(const TTF_Image *image, Uint32 *destinatio
     Uint8 bg_r, bg_g, bg_b;
     Uint32 bg_a;
 
+    int x, y = 0;
+
     fg_r = fg->r;
     fg_g = fg->g;
     fg_b = fg->b;
 
     while (height--) {
+        y++;
+        x = 0;
         /* *INDENT-OFF* */
         DUFFS_LOOP4(
-                /* prevent misaligned load: tmp = *src++; */
-                memcpy(&tmp, src++, sizeof(tmp)); /* This should NOT be SDL_memcpy */
+                x++;
+                tmp = *src++;
 
                 if (tmp) {
                     bg = *dst;
@@ -512,7 +512,7 @@ static SDL_INLINE void BG_Blended_Opaque_SDF(const TTF_Image *image, Uint32 *des
         /* *INDENT-OFF* */
         DUFFS_LOOP4(
             d = *dst;
-            s = ((Uint32)*src++) << 24;
+            s = *src++ << 24;
             if (s > d) {
                 *dst = s;
             }
@@ -566,7 +566,7 @@ static SDL_INLINE void BG_Blended_Opaque(const TTF_Image *image, Uint32 *destina
     while (height--) {
         /* *INDENT-OFF* */
         DUFFS_LOOP4(
-            *dst++ |= ((Uint32)*src++) << 24;
+            *dst++ |= *src++ << 24;
         , width);
         /* *INDENT-ON* */
         src += srcskip;
@@ -607,10 +607,10 @@ static SDL_INLINE void BG_Blended_Opaque_32(const TTF_Image *image, Uint32 *dest
     while (height--) {
         /* *INDENT-OFF* */
         DUFFS_LOOP4(
-            *dst++ |= ((Uint32)*src++) << 24;
-            *dst++ |= ((Uint32)*src++) << 24;
-            *dst++ |= ((Uint32)*src++) << 24;
-            *dst++ |= ((Uint32)*src++) << 24;
+            *dst++ |= *src++ << 24;
+            *dst++ |= *src++ << 24;
+            *dst++ |= *src++ << 24;
+            *dst++ |= *src++ << 24;
         , width);
         /* *INDENT-ON* */
         src += srcskip;
@@ -913,14 +913,11 @@ static SDL_INLINE void BG_64(const TTF_Image *image, Uint8 *destination, Sint32 
     Uint64       *dst    = (Uint64 *)destination;
     Uint32        width  = image->width / 8;
     Uint32        height = image->rows;
-    Uint64        tmp;
 
     while (height--) {
         /* *INDENT-OFF* */
         DUFFS_LOOP4(
-              /* prevent misaligned load: *dst++ |= *src++; */
-              memcpy(&tmp, src++, sizeof(tmp)); /* This should NOT be SDL_memcpy */
-              *dst++ |= tmp;
+            *dst++ |= *src++;
         , width);
         /* *INDENT-ON* */
         src = (const Uint64 *)((const Uint8 *)src + srcskip);
@@ -934,14 +931,11 @@ static SDL_INLINE void BG_32(const TTF_Image *image, Uint8 *destination, Sint32 
     Uint32       *dst    = (Uint32 *)destination;
     Uint32        width  = image->width / 4;
     Uint32        height = image->rows;
-    Uint32        tmp;
 
     while (height--) {
         /* *INDENT-OFF* */
         DUFFS_LOOP4(
-            /* prevent misaligned load: *dst++ |= *src++; */
-            memcpy(&tmp, src++, sizeof(tmp)); /* This should NOT be SDL_memcpy */
-            *dst++ |= tmp;
+            *dst++ |= *src++;
         , width);
         /* *INDENT-ON* */
         src = (const Uint32 *)((const Uint8 *)src + srcskip);
@@ -1021,8 +1015,6 @@ static void Draw_Line(TTF_Font *font, const SDL_Surface *textbuf, int column, in
     if (hb_direction == HB_DIRECTION_TTB || hb_direction == HB_DIRECTION_BTT) {
         return;
     }
-#else
-    (void) font;
 #endif
 
     /* Not needed because of "font->height = SDL_max(font->height, bottom_row);".
@@ -1032,12 +1024,6 @@ static void Draw_Line(TTF_Font *font, const SDL_Surface *textbuf, int column, in
      * than the ones of the "splitted lines". */
     if (tmp > 0) {
         line_thickness -= tmp;
-    }
-    /* Previous case also happens with SDF (render_sdf) , because 'spread' property
-     * requires to increase 'ystart'
-     * Check for valid value anyway.  */
-    if (line_thickness <= 0) {
-        return;
     }
 
     /* Wrapped mode with an unbroken line: 'line_width' is greater that 'textbuf->w' */
@@ -1107,7 +1093,7 @@ static void clip_glyph(int *_x, int *_y, TTF_Image *image, const SDL_Surface *te
 }
 
 /* Glyph width is rounded, dst addresses are aligned, src addresses are not aligned */
-static int Get_Alignment(void)
+static int Get_Alignement()
 {
 #if defined(HAVE_NEON_INTRINSICS)
     if (hasNEON()) {
@@ -1139,7 +1125,7 @@ static int Get_Alignment(void)
 static SDL_INLINE                                                                                                       \
 int Render_Line_##NAME(TTF_Font *font, SDL_Surface *textbuf, int xstart, int ystart, SDL_Color *fg)                     \
 {                                                                                                                       \
-    const int alignment = Get_Alignment() - 1;                                                                         \
+    const int alignment = Get_Alignement() - 1;                                                                         \
     const int bpp = ((IS_BLENDED || IS_LCD) ? 4 : 1);                                                                   \
     unsigned int i;                                                                                                     \
     Uint8 fg_alpha = (fg ? fg->a : 0);                                                                                  \
@@ -1392,12 +1378,13 @@ static SDL_INLINE int Render_Line(const render_mode_t render_mode, int subpixel,
 }
 
 #ifndef SIZE_MAX
-# define SIZE_MAX ((size_t)(-1))
+# define SIZE_MAX ((size_t) -1)
 #endif
 
 #if !SDL_VERSION_ATLEAST(2, 23, 1)
-SDL_FORCE_INLINE int
-compat_size_add_overflow (size_t a, size_t b, size_t *ret)
+SDL_FORCE_INLINE int compat_size_add_overflow (size_t a,
+                                               size_t b,
+                                               size_t *ret)
 {
     if (b > SIZE_MAX - a) {
         return -1;
@@ -1406,8 +1393,9 @@ compat_size_add_overflow (size_t a, size_t b, size_t *ret)
     return 0;
 }
 
-SDL_FORCE_INLINE int
-compat_size_mul_overflow (size_t a, size_t b, size_t *ret)
+SDL_FORCE_INLINE int compat_size_mul_overflow (size_t a,
+                                               size_t b,
+                                               size_t *ret)
 {
     if (a != 0 && b > SIZE_MAX / a) {
         return -1;
@@ -1432,7 +1420,7 @@ compat_size_mul_overflow (size_t a, size_t b, size_t *ret)
  */
 static SDL_Surface *AllocateAlignedPixels(size_t width, size_t height, SDL_PixelFormatEnum format, Uint32 bgcolor)
 {
-    const size_t alignment = Get_Alignment() - 1;
+    const size_t alignment = Get_Alignement() - 1;
     const size_t bytes_per_pixel = SDL_BYTESPERPIXEL(format);
     SDL_Surface *textbuf = NULL;
     size_t size;
@@ -1576,7 +1564,7 @@ static SDL_Surface *Create_Surface_Blended(int width, int height, SDL_Color fg, 
     bgcolor = (fg.r << 16) | (fg.g << 8) | fg.b;
 
     /* Underline/Strikethrough color style */
-    *color = bgcolor | ((Uint32)fg.a << 24);
+    *color = bgcolor | (fg.a << 24);
 
     /* Create the target surface if required */
     if (width != 0) {
@@ -1600,10 +1588,10 @@ static SDL_Surface* Create_Surface_LCD(int width, int height, SDL_Color fg, SDL_
     Uint32 bgcolor;
 
     /* Background color */
-    bgcolor = (((Uint32)bg.a) << 24) | (bg.r << 16) | (bg.g << 8) | bg.b;
+    bgcolor = (bg.a << 24) | (bg.r << 16) | (bg.g << 8) | bg.b;
 
     /* Underline/Strikethrough color style */
-    *color = (((Uint32)bg.a) << 24) | (fg.r << 16) | (fg.g << 8) | fg.b;
+    *color = (bg.a << 24) | (fg.r << 16) | (fg.g << 8) | fg.b;
 
     /* Create the target surface if required */
     if (width != 0) {
@@ -1689,7 +1677,7 @@ int TTF_Init(void)
     compil_neon = 1;
 #  endif
     SDL_Log("SDL_ttf: hasSSE2=%d hasNEON=%d alignment=%d duffs_loop=%d compil_sse2=%d compil_neon=%d",
-            sse2, neon, Get_Alignment(), duffs, compil_sse2, compil_neon);
+            sse2, neon, Get_Alignement(), duffs, compil_sse2, compil_neon);
 
     SDL_Log("Sizeof TTF_Image: %d c_glyph: %d TTF_Font: %d", sizeof (TTF_Image), sizeof (c_glyph), sizeof (TTF_Font));
 #endif
@@ -2101,7 +2089,7 @@ static void Flush_Cache(TTF_Font *font)
 
 static FT_Error Load_Glyph(TTF_Font *font, c_glyph *cached, int want, int translation)
 {
-    const int alignment = Get_Alignment() - 1;
+    const int alignment = Get_Alignement() - 1;
     FT_GlyphSlot slot;
     FT_Error error;
 
@@ -3018,11 +3006,7 @@ int TTF_GetFontKerning(const TTF_Font *font)
 void TTF_SetFontKerning(TTF_Font *font, int allowed)
 {
     font->allow_kerning = allowed;
-#if TTF_USE_HARFBUZZ
-    /* Harfbuzz can do kerning positioning even if the font hasn't the data */
-#else
     font->use_kerning   = allowed && FT_HAS_KERNING(font->face);
-#endif
 }
 
 long TTF_FontFaces(const TTF_Font *font)
@@ -3103,16 +3087,15 @@ int TTF_SetFontDirection(TTF_Font *font, TTF_Direction direction)
     } else if (direction == TTF_DIRECTION_RTL) {
         dir = HB_DIRECTION_RTL;
     } else if (direction == TTF_DIRECTION_TTB) {
-        dir = HB_DIRECTION_BTT;
-    } else if (direction == TTF_DIRECTION_BTT) {
         dir = HB_DIRECTION_TTB;
+    } else if (direction == TTF_DIRECTION_BTT) {
+        dir = HB_DIRECTION_BTT;
     } else {
         return -1;
     }
     font->hb_direction = dir;
     return 0;
 #else
-    (void) font;
     (void) direction;
     return -1;
 #endif
@@ -3137,7 +3120,6 @@ int TTF_SetFontScriptName(TTF_Font *font, const char *script)
     font->hb_script = scr;
     return 0;
 #else
-    (void) font;
     (void) script;
     return -1;
 #endif
@@ -3163,7 +3145,6 @@ static int TTF_Size_Internal(TTF_Font *font,
     hb_glyph_info_t *hb_glyph_info;
     hb_glyph_position_t *hb_glyph_position;
     int y = 0;
-    int advance_if_bold = 0;
 #else
     size_t textlen;
     int skip_first = 1;
@@ -3206,12 +3187,6 @@ static int TTF_Size_Internal(TTF_Font *font,
     font->pos_len = 0;
 
 #if TTF_USE_HARFBUZZ
-
-    /* Adjust for bold text */
-    if (TTF_HANDLE_STYLE_BOLD(font)) {
-        advance_if_bold = F26Dot6(font->glyph_overhang);
-    }
-
     /* Create a buffer for harfbuzz to use */
     hb_buffer = hb_buffer_create();
     if (hb_buffer == NULL) {
@@ -3237,14 +3212,7 @@ static int TTF_Size_Internal(TTF_Font *font,
 
     /* Layout the text */
     hb_buffer_add_utf8(hb_buffer, text, -1, 0, -1);
-
-    hb_feature_t userfeatures[1];
-    userfeatures[0].tag = HB_TAG('k','e','r','n');
-    userfeatures[0].value = font->allow_kerning;
-    userfeatures[0].start = HB_FEATURE_GLOBAL_START;
-    userfeatures[0].end = HB_FEATURE_GLOBAL_END;
-
-    hb_shape(font->hb_font, hb_buffer, userfeatures, 1);
+    hb_shape(font->hb_font, hb_buffer, NULL, 0);
 
     /* Get the result */
     hb_glyph_info = hb_buffer_get_glyph_infos(hb_buffer, &glyph_count);
@@ -3293,7 +3261,7 @@ static int TTF_Size_Internal(TTF_Font *font,
         /* Compute positions */
         pos_x  = x                     + x_offset;
         pos_y  = y + F26Dot6(font->ascent) - y_offset;
-        x     += x_advance + advance_if_bold;
+        x     += x_advance;
         y     += y_advance;
 #else
         /* Compute positions */
@@ -3505,16 +3473,6 @@ static SDL_Surface* TTF_Render_Internal(TTF_Font *font, const char *text, const 
         UCS2_to_UTF8(text16, utf8_alloc);
         text = (const char *)utf8_alloc;
     }
-
-#if TTF_USE_SDF
-    /* Invalid cache if we were using SDF */
-    if (render_mode != RENDER_BLENDED) {
-        if (font->render_sdf) {
-            font->render_sdf = 0;
-            Flush_Cache(font);
-        }
-    }
-#endif
 
     /* Get the dimensions of the text surface */
     if ((TTF_Size_Internal(font, text, STR_UTF8, &width, &height, &xstart, &ystart, NO_MEASUREMENT) < 0) || !width) {
@@ -3749,16 +3707,6 @@ static SDL_Surface* TTF_Render_Wrapped_Internal(TTF_Font *font, const char *text
         text_cpy = (char *)utf8_alloc;
     }
 
-#if TTF_USE_SDF
-    /* Invalid cache if we were using SDF */
-    if (render_mode != RENDER_BLENDED) {
-        if (font->render_sdf) {
-            font->render_sdf = 0;
-            Flush_Cache(font);
-        }
-    }
-#endif
-
     /* Get the dimensions of the text surface */
     if ((TTF_SizeUTF8(font, text_cpy, &width, &height) < 0) || !width) {
         TTF_SetError("Text has zero width");
@@ -3883,8 +3831,6 @@ static SDL_Surface* TTF_Render_Wrapped_Internal(TTF_Font *font, const char *text
                     }
                 }
             }
-            /* In case there are all newlines */
-            width = SDL_max(width, 1);
         }
     } else {
         if (numLines <= 1 && font->horizontal_align == TTF_WRAPPED_ALIGN_LEFT) {
@@ -3945,7 +3891,6 @@ static SDL_Surface* TTF_Render_Wrapped_Internal(TTF_Font *font, const char *text
         } else {
             xoffset = 0;
         }
-        xoffset = SDL_max(0, xoffset);
 
         /* Render one text line to textbuf at (xstart, ystart) */
         if (Render_Line(render_mode, font->render_subpixel, font, textbuf, xstart + xoffset, ystart, fg) < 0) {

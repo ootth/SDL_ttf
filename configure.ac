@@ -3,8 +3,8 @@ dnl Process this file with autoconf to produce a configure script.
 dnl Set various version strings - taken gratefully from the GTk sources
 # See docs/release_checklist.md
 m4_define([MAJOR_VERSION_MACRO], [2])
-m4_define([MINOR_VERSION_MACRO], [23])
-m4_define([MICRO_VERSION_MACRO], [0])
+m4_define([MINOR_VERSION_MACRO], [20])
+m4_define([MICRO_VERSION_MACRO], [2])
 
 AC_INIT([SDL2_ttf],
         [MAJOR_VERSION_MACRO.MINOR_VERSION_MACRO.MICRO_VERSION_MACRO],
@@ -245,10 +245,6 @@ if test x$enable_harfbuzz = xyes; then
 			# for uniscribe support:
 			TTF_LIBS="$TTF_LIBS -lusp10 -lgdi32 -lrpcrt4"
 			PC_LIBS="$PC_LIBS -lusp10 -lgdi32 -lrpcrt4"
-		  ;;
-		  *)
-			# compiler might optimize sinf+cosf into sincosf
-			TTF_LIBS="$TTF_LIBS -lm"
 		  ;;
 		esac
 		case "$host" in
